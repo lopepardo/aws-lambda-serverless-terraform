@@ -1,5 +1,7 @@
-import "dotenv/config";
+import { config } from "dotenv";
 import { z } from "zod";
+
+config({ quiet: true });
 
 const RawEnvSchema = z.object({
   APP_ENV: z.enum(["dev", "test", "production"]).default("dev"),

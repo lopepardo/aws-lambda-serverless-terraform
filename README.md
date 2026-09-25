@@ -67,13 +67,13 @@ Solo existe una ruta: `POST /orders`. Acepta un objeto JSON como este:
 | --------------- | ------------------------------------------------------------------ |
 | `orderId`       | De 1 a 64 letras ASCII, números, guiones o guiones bajos.          |
 | `customerEmail` | Debe contener `@` y tener como máximo 320 caracteres.              |
-| `amount`        | Número o cadena numérica, mayor que 0 y menor o igual a 1 000 000. |
+| `amount`        | Cadena decimal mayor que 0 y menor o igual a 1 000 000.             |
 
 El cuerpo no puede superar 64 KiB. Si el evento se publica correctamente, la API devuelve `202`:
 
 ```json
 {
-  "message": "Pedido aceptado para procesamiento",
+  "message": "Order accepted for processing",
   "orderId": "pedido-001",
   "requestId": "identificador-de-la-peticion"
 }
