@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@aws-sdk/client-dynamodb@3.1139.0'
+  - '@aws-sdk/client-eventbridge@3.1139.0'
+  - '@aws-sdk/client-sqs@3.1139.0'

@@ -1,0 +1,31 @@
+{
+  "name": "lambda-serverless-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "pnpm run typecheck && pnpm run build:ingest && pnpm run build:worker",
+    "build:ingest": "esbuild src/ingest/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=build/ingest/index.cjs",
+    "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=build/worker/index.cjs",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1139.0",
+    "@aws-sdk/client-eventbridge": "^3.1139.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.163",
+    "@types/node": "^24.13.6",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
