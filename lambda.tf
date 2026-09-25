@@ -67,6 +67,7 @@ resource "aws_lambda_function" "worker" {
 
   environment {
     variables = {
+      APP_ENV    = local.environment
       TABLE_NAME = aws_dynamodb_table.orders.name
     }
   }
