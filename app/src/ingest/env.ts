@@ -4,13 +4,13 @@ import { z } from "zod";
 config({ quiet: true });
 
 const RawEnvSchema = z.object({
-  NODE_ENV: z.enum(["dev", "test", "production"]).default("dev"),
+  APP_ENV: z.enum(["dev", "test", "production"]).default("dev"),
   EVENT_BUS_NAME: z.string().trim().min(1),
 });
 
 const AppConfigSchema = RawEnvSchema.transform((rawEnv) => {
   return {
-    NODE_ENV: rawEnv.NODE_ENV,
+    APP_ENV: rawEnv.APP_ENV,
     EVENTBRIDGE: {
       EVENT_BUS_NAME: rawEnv.EVENT_BUS_NAME,
     },

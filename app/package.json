@@ -12,9 +12,6 @@
     "build": "pnpm run typecheck && pnpm run build:ingest && pnpm run build:worker",
     "build:ingest": "esbuild src/ingest/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=build/ingest/index.cjs",
     "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=build/worker/index.cjs",
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
-    "test": "npm run build && node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -27,7 +24,6 @@
     "@types/aws-lambda": "^8.10.163",
     "@types/node": "^24.13.6",
     "esbuild": "^0.28.2",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
 }

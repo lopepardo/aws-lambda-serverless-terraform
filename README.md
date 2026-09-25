@@ -1,6 +1,6 @@
 # Pedidos serverless en AWS con TypeScript y Terraform
 
-Proyecto de aprendizaje para recibir pedidos por HTTP y procesarlos de forma asíncrona en AWS. Terraform crea la infraestructura; dos funciones Lambda escritas en TypeScript validan los pedidos y los guardan en DynamoDB.
+Proyecto de aprendizaje para recibir pedidos por HTTP y procesarlos de forma asíncrona en AWS. Terraform crea la infraestructura; la Lambda `ingest` valida y publica los pedidos, y la Lambda `worker` los guarda en DynamoDB.
 
 - **Aplicación:** Lambda `ingest` recibe el pedido y Lambda `worker` lo guarda.
 - **Infraestructura:** API Gateway, EventBridge, SQS, SNS, DynamoDB, IAM y CloudWatch.
@@ -10,6 +10,8 @@ Proyecto de aprendizaje para recibir pedidos por HTTP y procesarlos de forma as�
 <p align="center">
   <img src="./docs/architecture.png" width="900" alt="Flujo de pedidos entre API Gateway, Lambda, EventBridge, SQS, SNS y DynamoDB">
 </p>
+
+El navegador del diagrama representa un cliente HTTP. Las páginas servidas desde otro origen necesitan CORS para llamar a esta API; el proyecto aún no lo configura.
 
 ```text
 POST /orders → API Gateway → Lambda ingest → EventBridge
@@ -23,17 +25,19 @@ POST /orders → API Gateway → Lambda ingest → EventBridge
 4. Si falla la entrega de EventBridge, el evento va a `eventbridge_dlq`. Si falla repetidamente el procesamiento, el mensaje va a `processing_dlq` y se activa una alarma de CloudWatch.
 
 > [!IMPORTANT]
-> Por asincronía, La respuesta HTTP `202` confirma que EventBridge aceptó el evento. No confirma que el pedido ya esté guardado en DynamoDB. El correo y la escritura son destinos independientes.
+> Por asincronía, la respuesta HTTP `202` confirma que EventBridge aceptó el evento. No confirma que el pedido ya esté guardado en DynamoDB. El correo y la escritura son destinos independientes.
 
 ## Estructura del repositorio
 
 ```text
 .
 ├── app/
-│   ├── src/ingest/index.ts       Validación y publicación del evento
-│   ├── src/worker/index.ts       Consumo de SQS y escritura en DynamoDB
+│   ├── src/ingest/              Handler, validación, EventBridge, entorno y logger
+│   ├── src/worker/              Handler, procesamiento, DynamoDB, entorno y logger
 │   ├── package.json              Dependencias y comandos de compilación
-│   └── pnpm-lock.yaml
+│   ├── pnpm-lock.yaml
+│   ├── pnpm-workspace.yaml
+│   └── tsconfig.json
 ├── docs/architecture.png         Diagrama de arquitectura
 ├── api.tf                        HTTP API y ruta POST /orders
 ├── lambda.tf                     Funciones, paquetes y disparador SQS
@@ -44,12 +48,18 @@ POST /orders → API Gateway → Lambda ingest → EventBridge
 ├── iam.tf                        Roles y permisos
 ├── observability.tf              Logs y alarma
 ├── backend.tf                    Estado remoto en S3
+├── providers.tf                  Versiones y configuración de proveedores
+├── locals.tf                     Nombres y etiquetas compartidos
+├── data.tf                       Datos de cuenta y región
 ├── variables.tf                  Correo de notificaciones
 ├── outputs.tf                    URL de la API, tabla y cola
-└── terraform.tfvars.example      Ejemplo de configuración local
+├── terraform.tfvars.example      Ejemplo de configuración local
+└── .terraform.lock.hcl           Versiones resueltas de proveedores
 ```
 
-`app/build/` se genera al compilar. `app/node_modules/`, `app/build/`, `.terraform/` y `terraform.tfvars` están ignorados por Git. El archivo `.terraform.lock.hcl` fija las versiones de los proveedores y debe conservarse en el repositorio.
+En ambas Lambdas, `index.ts` compone el logger y el adaptador con la función de proceso (`processRequest` o `processBatch`). La lógica vive en `ingest.ts` y `worker.ts`.
+
+`app/build/` se genera al compilar. `app/node_modules/`, `app/build/`, `.terraform/` y `terraform.tfvars` están ignorados por Git. El archivo `.terraform.lock.hcl` fija las versiones de los proveedores y se conserva en el repositorio.
 
 ## API
 
@@ -69,6 +79,8 @@ Solo existe una ruta: `POST /orders`. Acepta un objeto JSON como este:
 | `customerEmail` | Debe contener `@` y tener como máximo 320 caracteres.              |
 | `amount`        | Cadena decimal mayor que 0 y menor o igual a 1 000 000.             |
 
+`amount` llega como cadena en el JSON y `worker` lo escribe como atributo numérico en DynamoDB.
+
 El cuerpo no puede superar 64 KiB. Si el evento se publica correctamente, la API devuelve `202`:
 
 ```json
@@ -85,11 +97,15 @@ Los datos inválidos producen `400`; un fallo al publicar el evento produce `500
 
 Esta configuración despliega un único entorno, `dev`, en `us-east-1`. Los recursos usan el prefijo `lambda-serverless-dev` y etiquetas de proyecto, entorno y administración.
 
+Terraform entrega `APP_ENV=dev` y `EVENT_BUS_NAME` a `ingest`, y `APP_ENV=dev` y `TABLE_NAME` a `worker`. Ambas Lambdas validan estas variables al iniciar. Para ejecución local, `dotenv` puede cargar un archivo `.env` desde el directorio de ejecución; las variables ya definidas en el entorno tienen prioridad.
+
 El estado se guarda en un bucket S3 **que ya debe existir**. Su nombre se pasa a `terraform init`; el backend activa el cifrado y el bloqueo nativo de S3. La clave del objeto es:
 
 ```text
 lambda-serverless/dev/statefile.tfstate
 ```
+
+La identidad de Terraform necesita acceso de lectura y escritura al estado, y permiso de borrado sobre el archivo de bloqueo `.tflock`.
 
 | Entrada o salida       | Uso                                                       |
 | ---------------------- | --------------------------------------------------------- |
@@ -182,13 +198,13 @@ aws dynamodb get-item \
 
 El registro contiene `orderId`, `customerEmail`, `amount`, `createdAt`, `processedAt`, `eventId` y el estado `RECEIVED`. Cambia `orderId` en cada prueba si quieres crear un registro nuevo. Comprueba también que llegó el correo de SNS.
 
-Si el pedido tarda en aparecer, consulta los logs de `worker` y revisa la cola `lambda-serverless-dev-processing-dlq`:
+Si el pedido tarda en aparecer, consulta los logs de `worker` y revisa la cola `lambda-serverless-dev-processing-dlq`.
 
 ## Procesamiento y fallos
 
 | Etapa                   | Reintentos y destino de error                                                                                                                                                        |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| EventBridge → SQS o SNS | Hasta 185 intentos durante un máximo de 24 horas. Si no puede entregar el evento, lo envía a `eventbridge_dlq`.                                                                      |
+| EventBridge → SQS o SNS | Hasta 185 reintentos durante un máximo de 24 horas. Si no puede entregar el evento, lo envía a `eventbridge_dlq`.                                                                   |
 | SQS → `worker`          | La cola tiene 60 segundos de visibilidad. `worker` informa los fallos por mensaje para reintentar solo los que fallaron; tras cinco recepciones, el mensaje pasa a `processing_dlq`. |
 
 La cola de procesamiento retiene mensajes hasta 4 días; ambas DLQ los retienen hasta 14 días. Una alarma publica en SNS cuando hay al menos un mensaje visible en `processing_dlq`. `eventbridge_dlq` no tiene alarma. Las DLQ requieren inspección y recuperación manual; no hay reprocesamiento automático.

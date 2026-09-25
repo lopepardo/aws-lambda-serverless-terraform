@@ -23,7 +23,7 @@ resource "aws_lambda_function" "ingest" {
 
   environment {
     variables = {
-      APP_ENV    = local.environment
+      APP_ENV        = local.environment
       EVENT_BUS_NAME = aws_cloudwatch_event_bus.orders.name
     }
   }
