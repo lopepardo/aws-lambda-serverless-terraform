@@ -12,7 +12,10 @@
     "build": "pnpm run typecheck && pnpm run build:ingest && pnpm run build:worker",
     "build:ingest": "esbuild src/ingest/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=build/ingest/index.cjs",
     "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=build/worker/index.cjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1139.0",
@@ -24,6 +27,8 @@
     "@types/aws-lambda": "^8.10.163",
     "@types/node": "^24.13.6",
     "esbuild": "^0.28.2",
-    "typescript": "^7.0.2"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
   }
 }

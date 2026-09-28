@@ -32,12 +32,20 @@ POST /orders → API Gateway → Lambda ingest → EventBridge
 ```text
 .
 ├── app/
-│   ├── src/ingest/              Handler, validación, EventBridge, entorno y logger
-│   ├── src/worker/              Handler, procesamiento, DynamoDB, entorno y logger
+│   ├── src/
+│   │   ├── ingest/               Handler, validación, EventBridge, entorno y logger
+│   │   └── worker/               Handler, procesamiento, DynamoDB, entorno y logger
+│   ├── scripts/                  Invocaciones manuales de ingest y worker
+│   ├── test/
+│   │   ├── unit/                 Pruebas unitarias de ingest y worker
+│   │   └── integration/          Prueba optativa con EventBridge real
 │   ├── package.json              Dependencias y comandos de compilación
 │   ├── pnpm-lock.yaml
 │   ├── pnpm-workspace.yaml
-│   └── tsconfig.json
+│   ├── tsconfig.json
+│   ├── tsconfig.test.json
+│   ├── vitest.config.ts
+│   └── vitest.integration.config.ts
 ├── docs/architecture.png         Diagrama de arquitectura
 ├── api.tf                        HTTP API y ruta POST /orders
 ├── lambda.tf                     Funciones, paquetes y disparador SQS
@@ -73,11 +81,11 @@ Solo existe una ruta: `POST /orders`. Acepta un objeto JSON como este:
 }
 ```
 
-| Campo           | Validación                                                         |
-| --------------- | ------------------------------------------------------------------ |
-| `orderId`       | De 1 a 64 letras ASCII, números, guiones o guiones bajos.          |
-| `customerEmail` | Debe contener `@` y tener como máximo 320 caracteres.              |
-| `amount`        | Cadena decimal mayor que 0 y menor o igual a 1 000 000.             |
+| Campo           | Validación                                                |
+| --------------- | --------------------------------------------------------- |
+| `orderId`       | De 1 a 64 letras ASCII, números, guiones o guiones bajos. |
+| `customerEmail` | Debe contener `@` y tener como máximo 320 caracteres.     |
+| `amount`        | Cadena decimal mayor que 0 y menor o igual a 1 000 000.   |
 
 `amount` llega como cadena en el JSON y `worker` lo escribe como atributo numérico en DynamoDB.
 
@@ -135,6 +143,40 @@ cd ..
 ```
 
 La compilación comprueba los tipos y crea `app/build/ingest/index.cjs` y `app/build/worker/index.cjs`. Terraform los empaqueta en archivos ZIP. **Compila antes de `terraform plan` o `terraform apply`**: Terraform utiliza esos archivos JavaScript, no el código TypeScript directamente.
+
+## Pruebas y ejecución local
+
+Desde `app/`, ejecuta las pruebas unitarias con Vitest:
+
+```bash
+pnpm test
+pnpm run test:watch
+```
+
+Estas pruebas usan adaptadores simulados y no llaman a AWS. `pnpm run typecheck` también comprueba los archivos de pruebas y los scripts locales. Para invocar ambas funciones manualmente sin AWS:
+
+```bash
+node --import tsx scripts/local-ingest.ts
+node --import tsx scripts/local-worker.ts
+```
+
+`scripts/local-worker.ts` construye un evento SQS de ejemplo, muestra el pedido que escribiría en DynamoDB y devuelve `batchItemFailures: []` cuando termina correctamente.
+
+Con la infraestructura ya desplegada, puedes ejecutar la prueba de integración contra EventBridge real. El perfil AWS debe tener `events:PutEvents` sobre el bus:
+
+```bash
+EVENT_BUS_NAME=lambda-serverless-dev-bus pnpm run test:integration
+```
+
+Esta prueba comprueba que EventBridge acepta el evento; no espera a que `worker` termine. Al publicar el evento, la infraestructura desplegada puede procesar el pedido y enviar la notificación de SNS. Con las mismas variables puedes ejecutar `node --import tsx scripts/local-ingest-aws.ts` para ver una invocación manual del handler real.
+
+También puedes invocar el handler de `worker` desde tu equipo contra la tabla DynamoDB desplegada. Usa un perfil AWS con permiso `dynamodb:PutItem`; si tu perfil no define la región, indica `AWS_REGION=us-east-1`:
+
+```bash
+TABLE_NAME=lambda-serverless-dev-table node --import tsx scripts/local-worker-aws.ts
+```
+
+Este comando escribe un pedido nuevo directamente en DynamoDB. No consume un mensaje real de SQS ni publica una notificación de SNS.
 
 ## Desplegar desarrollo
 
@@ -204,7 +246,7 @@ Si el pedido tarda en aparecer, consulta los logs de `worker` y revisa la cola `
 
 | Etapa                   | Reintentos y destino de error                                                                                                                                                        |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| EventBridge → SQS o SNS | Hasta 185 reintentos durante un máximo de 24 horas. Si no puede entregar el evento, lo envía a `eventbridge_dlq`.                                                                   |
+| EventBridge → SQS o SNS | Hasta 185 reintentos durante un máximo de 24 horas. Si no puede entregar el evento, lo envía a `eventbridge_dlq`.                                                                    |
 | SQS → `worker`          | La cola tiene 60 segundos de visibilidad. `worker` informa los fallos por mensaje para reintentar solo los que fallaron; tras cinco recepciones, el mensaje pasa a `processing_dlq`. |
 
 La cola de procesamiento retiene mensajes hasta 4 días; ambas DLQ los retienen hasta 14 días. Una alarma publica en SNS cuando hay al menos un mensaje visible en `processing_dlq`. `eventbridge_dlq` no tiene alarma. Las DLQ requieren inspección y recuperación manual; no hay reprocesamiento automático.
@@ -240,6 +282,6 @@ La destrucción elimina la tabla y las colas junto con sus datos y mensajes. El 
 
 - Solo existe `dev` en `us-east-1`; no hay configuración de producción.
 - La API crea pedidos, pero no ofrece una ruta para consultarlos.
-- No hay autenticación, CORS, pruebas automatizadas ni pipeline de despliegue.
+- No hay autenticación, CORS ni pipeline de despliegue.
 - DynamoDB no tiene recuperación a un punto en el tiempo ni protección contra borrado.
 - No hay alarma para `eventbridge_dlq` ni reprocesamiento automático de las DLQ.
